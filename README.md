@@ -3,6 +3,16 @@
 ![](images/diagram.png)
 ---
 
+## Requirement
+
+Hostname     | IP Address
+-------------|--------------
+pgpool-1     | 192.168.33.11
+postgresql-1 | 192.168.33.21  
+postgresql-2 | 192.168.33.22
+
+---
+
 ## Install PostgreSQL in primary and standby server
 #### login root user
 ```
