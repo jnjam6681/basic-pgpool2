@@ -150,7 +150,7 @@ CREATE DATABASE
 \l
 ```
 
-#### standy server
+#### standby server
 ```
 systemctl status postgresql
 sudo -u postgres psql
