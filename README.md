@@ -14,12 +14,11 @@ postgresql-2 | 192.168.33.22
 ---
 
 ## Install PostgreSQL in primary and standby server
-#### login root user
+#### Login root user
 ```
 sudo su
 ```
-
-#### update repository
+#### Update repository for postgresql
 ```
 sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 ```
@@ -27,151 +26,204 @@ sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgd
 wget -q -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
 ```
 
-#### update packages
+#### Update repository for repmgr
+```
+sh -c 'echo "deb https://apt.2ndquadrant.com/ $(lsb_release -cs)-2ndquadrant main" > /etc/apt/sources.list.d/2ndquadrant.list'
+```
+```
+curl https://apt.2ndquadrant.com/site/keys/9904CD4BD6BAF0C3.asc | sudo apt-key add -
+```
+
+#### generate ssh-key all servers
+```
+ssh-keygen
+
+# Paste ssh key id_rsa.pub on other servers
+nano .sshauthorized_keys
+```
+
+#### Update packages
 ```
 apt-get update
 apt-get upgrade -y
 ```
 
-#### install postgresql
+#### Install PostgreSQL and Repmgr
 ```
-apt-get install -y postgresql-12
-```
----
-## config in primary server
-#### create user for replication in database (named replication and REPLICATION privileges)
-```
-su - postgres
-psql
-CREATE ROLE pgpool WITH REPLICATION PASSWORD '12345678' LOGIN;
-CREATE ROLE admin WITH NOSUPERUSER CREATEDB PASSWORD '12345678' LOGIN;
-\q
+apt-get install -y postgresql-12 postgresql-12-repmgr
 ```
 
-#### change config in postgresql.conf file
+---
+## Configure in primary and standby server
+#### Create user for replication in database (named repmgr)
+```
+su - postgres
+createuser --replication --createdb --createrole --superuser repmgr
+createdb --owner=repmgr repmgr
+psql -c "ALTER USER repmgr SET search_path TO repmgr, public;"
+```
+
+#### Change config in primary and standby server
 ```
 nano /etc/postgresql/12/main/postgresql.conf
 ```
 ```
 listen_addresses = '*'
 wal_level = hot_standby # send data without delay
-max_replication_slots = 3 # set maximal number of replication slots
-max_wal_senders = 3 # maximal number of concurrent connections from standby servers
+archive_mode = on
+archive_command = 'test ! -f /mnt/postgresql-server/archive/%f && cp %p /mnt/postgresql-server/archive/%f'
+max_replication_slots = 10 # set maximal number of replication slots
+max_wal_senders = 10 # maximal number of concurrent connections from standby servers
+wal_keep_segments = 64
 hot_standby = on
 synchronous_standby_names = '*'
+shared_preload_libraries = 'repmgr'
 ```
 or use shell scripts
 ```
 sed -i -e "s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" /etc/postgresql/12/main/postgresql.conf
 sed -i -e "s/#wal_level = replica/wal_level = hot_standby/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#max_wal_senders = 10/max_wal_senders = 311/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#max_replication_slots = 10/max_replication_slots = 3/g" /etc/postgresql/12/main/postgresql.conf
+sed -i -e "s/#archive_mode = off/archive_mode = on/g" /etc/postgresql/12/main/postgresql.conf
+sed -i -e "s/#archive_command = ''/archive_command = 'test ! -f /mnt/postgresql-server/archive/%f && cp %p /mnt/postgresql-server/archive/%f'/g" /etc/postgresql/12/main/postgresql.conf
+sed -i -e "s/#max_wal_senders = 10/max_wal_senders = 10/g" /etc/postgresql/12/main/postgresql.conf
+sed -i -e "s/#max_replication_slots = 10/max_replication_slots = 10/g" /etc/postgresql/12/main/postgresql.conf
+sed -i -e "s/#wal_keep_segments = 0/wal_keep_segments = 64/g" /etc/postgresql/12/main/postgresql.conf
 sed -i -e "s/#hot_standby = on/hot_standby = on/g" /etc/postgresql/12/main/postgresql.conf
 sed -i -e "s/#synchronous_standby_names = ''/synchronous_standby_names = '*'/g" /etc/postgresql/12/main/postgresql.conf
+sed -i -e "s/#shared_preload_libraries = ''/shared_preload_libraries = 'repmgr'/g" /etc/postgresql/12/main/postgresql.conf
+```
+```
+mkdir -p /mnt/postgresql-server/archive
 ```
 
-#### add/change in pg_hba.conf file
+#### Add/change postgresql connectivity in primary and standby server
 ```
 nano /etc/postgresql/12/main/pg_hba.conf
 ```
 ```
-host    replication     all             192.168.33.21/32        trust # postgres-1
-host    replication     all             192.168.33.22/32        trust # postgres-2
-host    postgres        pgpool          192.168.33.11/32        trust # pgpool-1
-host    all             all             192.168.33.11/32        md5 # pgpool-1
+host    repmgr          repmgr          192.168.33.21/32        trust
+host    repmgr          repmgr          192.168.33.22/32        trust
+
+host    replication     repmgr          192.168.33.22/32        trust
+host    replication     repmgr          192.168.33.22/32        trust
 ```
 
-#### restart service postgresql in primary server
+#### Restart service postgresql
 ```
 service postgresql restart
 ```
 
-#### create replication slot in primary server
+#### Testing repmgr
 ```
 su - postgres
-psql
-SELECT * FROM pg_create_physical_replication_slot('it_rdbms02');
-\q
+psql 'host=192.168.33.21 dbname=repmgr user=repmgr connect_timeout=2'
 ```
 
-#### restart service postgresql in primary server
-```
-service postgresql restart
-```
 ---
-## config in standby server
-#### change config in postgresql.conf file agian
+## Create configure repmgr in primary and standby server
+#### For primary server
 ```
-nano /etc/postgresql/12/main/postgresql.conf
-```
-```
-listen_addresses = '*'
-wal_level = hot_standby # send data without delay
-hot_standby = on
-hot_standby_feedback = on
-```
-or use shell scripts
-```
-sed -i -e "s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#wal_level = replica/wal_level = hot_standby/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#hot_standby = on/hot_standby = on/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#hot_standby_feedback = off/hot_standby_feedback = on/g" /etc/postgresql/12/main/postgresql.conf
-```
-
-#### add/change in pg_hba.conf file
-```
-nano /etc/postgresql/12/main/pg_hba.conf
+nano /etc/repmgr.conf
 ```
 ```
-host    postgres        pgpool          192.168.33.11/32        trust # pgpool-1
-host    all             all             192.168.33.11/32        md5 # pgpool-1
+node_id=1
+node_name='node1'
+conninfo='host=192.168.33.21 user=repmgr dbname=repmgr connect_timeout=2'
+data_directory='/var/lib/postgresql/12/main'
+reconnect_attempts=4
+reconnect_interval=5
+failover=automatic
+pg_bindir='/usr/lib/postgresql/12/bin'
+promote_command='repmgr standby remote -f /etc/repmgr.conf'
+follow_command='repmgr standby follow -f /etc/repmgr.conf'
+log_level=INFO
+log_file='/var/loh/postgresql/repmgr.log'
 ```
 
-#### stop postgresql in standby server and remove the data directory
+#### For standby server
+```
+nano /etc/repmgr.conf
+```
+```
+node_id=2
+node_name='node2'
+conninfo='host=192.168.33.22 user=repmgr dbname=repmgr connect_timeout=2'
+data_directory='/var/lib/postgresql/12/main'
+reconnect_attempts=4
+reconnect_interval=5
+failover=automatic
+pg_bindir='/usr/lib/postgresql/12/bin'
+promote_command='repmgr standby remote -f /etc/repmgr.conf'
+follow_command='repmgr standby follow -f /etc/repmgr.conf'
+log_level=INFO
+log_file='/var/loh/postgresql/repmgr.log'
+```
+
+#### Allow automatic failover in primary and standby server
+```
+nano /etc/default/repmgrd
+```
+```
+REPMGRD_ENABLED=yes
+REPMGRD_CONF="/etc/repmgr.conf"
+```
+
+#### Restart repmgr service
+```
+service repmgrd restart
+```
+
+### Register cluster in primary server
+```
+su - postgres
+repmgr primary register
+repmgr cluster show
+```
+
+### Register cluster in standby server
 ```
 service postgresql stop
-cd /var/lib/postgresql/12
-rm -rf main
+service repmgrd stop
 ```
-
-#### execute pg_basebackup command in order to get initial state from primary server
+```
+rm -rf /var/lib/postgresql/12/main
+su - postgres
+repmgr -h 192.168.33.21 -U repmgr -d repmgr -f /etc/repmgr.conf standby clone
+exit
+service postgresql start
+```
 ```
 su - postgres
-pg_basebackup -v -D /var/lib/postgresql/12/main -R -P -h 192.168.33.21 -p 5432
-```
----
-## testing replication
-#### primary server
-```
-systemctl status postgresql
-sudo -u postgres psql
-CREATE DATABASE replicationtest;
-CREATE DATABASE
-\l
+repmgr -f /etc/repmgr.conf standby register
+repmgr cluster show
 ```
 
-#### standby server
-```
-systemctl status postgresql
-sudo -u postgres psql
-\l
-```
-
-#### if you can't use psql in standby server
+#### If you can't use psql in standby server
 ```
 chown -R postgres:postgres /var/lib/postgresql/12/
 chmod -R u=rwX,go= /var/lib/postgresql/12/
-systemctl restart postgresql
+service postgresql restart
 ```
 
 ---
+## Checking replication status
+#### You should have one Slave in sync_state = sync and all others in sync_state = potential
+```
+psql -U repmgr -h 192.168.33.21 -p 5432 -x -c "select * from pg_stat_replication"
+```
 
-## pgpool2 server
-#### login root user
+#### All the slaves should return on, the master returns off, since it can also execute write queries
+```
+psql -U repmgr -h 192.168.33.21 -p 5432 -x -c "show transaction_read_only"
+```
+
+---
+## PgPool2 server
+#### Login root user
 ```
 sudo su
 ```
-#### update repository
+#### Update repository
 ```
 sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 ```
@@ -179,59 +231,104 @@ sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgd
 wget -q -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
 ```
 
-#### update packages
+#### Update packages
 ```
 apt-get update
 apt-get upgrade -y
 ```
 
-#### install packages
+#### Install packages
 ```
 apt-get install -y postgresql-client-12 pgpool2
 ```
 
-#### update config pgpool
+#### Update config pgpool
 ```
 nano /etc/pgpool2/pgpool.conf
 ```
 ```
 listen_addresses = '*'   
+port = 5432
 
 backend_hostname0 = '192.168.33.21'
 backend_port0 = 5432
 backend_weight0 = 1
 backend_data_directory0 = '/var/lib/postgresql/12/main'
-
-listen_addresses = '*'            
-backend_hostname0 = '192.168.33.22'
-backend_port0 = 5432
-backend_weight0 = 1
-backend_data_directory0 = '/var/lib/postgresql/12/main'
-
-enable_pool_hba = on
-pool_passwd = 'pool_passwd'
+backend_flag1 = 'ALLOW_TO_FAILOVER'
+          
+backend_hostname1 = '192.168.33.22'
+backend_port1 = 5432
+backend_weight1 = 1
+backend_data_directory1 = '/var/lib/postgresql/12/main'
+backend_flag1 = 'ALLOW_TO_FAILOVER'
 
 load_balance_mode = on
-
 master_slave_mode = on
 master_slave_sub_mode = 'stream'
-
 sr_check_user = 'pgpool'
+sr_check_database = 'pgpool'
 wd_lifecheck_user = 'pgpool'
+
+health_check_period = 30
+health_check_timeout = 20
+health_check_user = 'pgpool'
+health_check_password = ''
+health_check_database = 'pgpool'
+health_check_max_retries = 5
+health_check_retry_delay = 20
+connect_timeout = 10000
 ```
 
-#### update pool_hba.conf
+#### Create pgpool user on primary server
+```
+create user pgpool;
+create database pgpool;
+GRANT ALL PRIVILEGES ON DATABASE "pgpool" to pgpool;
+```
+
+#### Create admin user for testing
+```
+CREATE ROLE admin WITH NOSUPERUSER CREATEDB PASSWORD '12345678' LOGIN;
+```
+
+#### Update pool_hba.conf
 ```
 nano /etc/pgpool2/pool_hba.conf
 ```
 ```
-host    replication     all             192.168.33.21/32        trust
-host    replication     all             192.168.33.22/32        trust
-host    postgres        pgpool          192.168.33.11/32        trust
+host    repmgr          repmgr          192.168.33.21/32        trust
+host    repmgr          repmgr          192.168.33.22/32        trust
+host    replication     repmgr          192.168.33.22/32        trust
+host    replication     repmgr          192.168.33.22/32        trust
+host    pgpool          pgpool          192.168.33.11/32        trust
 host    all             all             192.168.33.11/32        md5
 ```
 
-#### stop and start pgpool
+#### Add postgresql connectivity in primary and standby server
+```
+nano /etc/postgresql/12/main/pg_hba.conf
+```
+```
+host    pgpool          pgpool          192.168.33.11/32        trust
+host    all             all             192.168.33.11/32        md5
+```
+
+#### Restart service postgresql in primary and standby server
+```
+service postgresql restart
+```
+
+#### Restart repmgr service in pgpool server
+```
+service pgpool2 restart
+```
+
+#### Assign password postgres into pg_password
+```
+pg_md5 -u admin -m 12345678
+```
+
+#### Stop and Start Pgpool
 ```
 pgpool stop
 ```
@@ -240,7 +337,7 @@ pgpool -n
 pgpool  
 ```
 
-#### testing pgpool
+#### Testing PgPool
 ```
 createdb -h 192.168.33.11 db-admin -U admin
 psql -h 192.168.33.11 db-admin -U admin
