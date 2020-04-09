@@ -20,7 +20,7 @@ sudo su
 ```
 #### Update repository for postgresql
 ```
-sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 ```
 ```
 wget -q -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
@@ -28,10 +28,21 @@ wget -q -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key a
 
 #### Update repository for repmgr
 ```
-sh -c 'echo "deb https://apt.2ndquadrant.com/ $(lsb_release -cs)-2ndquadrant main" > /etc/apt/sources.list.d/2ndquadrant.list'
+sudo sh -c 'echo "deb https://apt.2ndquadrant.com/ $(lsb_release -cs)-2ndquadrant main" > /etc/apt/sources.list.d/2ndquadrant.list'
 ```
 ```
 curl https://apt.2ndquadrant.com/site/keys/9904CD4BD6BAF0C3.asc | sudo apt-key add -
+```
+
+#### Update packages
+```
+sudo apt-get update
+sudo apt-get upgrade -y
+```
+
+#### Install PostgreSQL and Repmgr
+```
+sudo apt-get install -y postgresql-12 postgresql-12-repmgr
 ```
 
 #### generate ssh-key all servers
@@ -39,33 +50,23 @@ curl https://apt.2ndquadrant.com/site/keys/9904CD4BD6BAF0C3.asc | sudo apt-key a
 ssh-keygen
 
 # Paste ssh key id_rsa.pub on other servers
-nano .sshauthorized_keys
-```
-
-#### Update packages
-```
-apt-get update
-apt-get upgrade -y
-```
-
-#### Install PostgreSQL and Repmgr
-```
-apt-get install -y postgresql-12 postgresql-12-repmgr
+nano .ssh/authorized_keys
 ```
 
 ---
 ## Configure in primary and standby server
 #### Create user for replication in database (named repmgr)
 ```
-su - postgres
+sudo -i -u postgres
 createuser --replication --createdb --createrole --superuser repmgr
 createdb --owner=repmgr repmgr
 psql -c "ALTER USER repmgr SET search_path TO repmgr, public;"
+exit
 ```
 
 #### Change config in primary and standby server
 ```
-nano /etc/postgresql/12/main/postgresql.conf
+sudo nano /etc/postgresql/12/main/postgresql.conf
 ```
 ```
 listen_addresses = '*'
@@ -81,24 +82,24 @@ shared_preload_libraries = 'repmgr'
 ```
 or use shell scripts
 ```
-sed -i -e "s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#wal_level = replica/wal_level = hot_standby/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#archive_mode = off/archive_mode = on/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#archive_command = ''/archive_command = 'test ! -f /mnt/postgresql-server/archive/%f && cp %p /mnt/postgresql-server/archive/%f'/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#max_wal_senders = 10/max_wal_senders = 10/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#max_replication_slots = 10/max_replication_slots = 10/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#wal_keep_segments = 0/wal_keep_segments = 64/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#hot_standby = on/hot_standby = on/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#synchronous_standby_names = ''/synchronous_standby_names = '*'/g" /etc/postgresql/12/main/postgresql.conf
-sed -i -e "s/#shared_preload_libraries = ''/shared_preload_libraries = 'repmgr'/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#wal_level = replica/wal_level = hot_standby/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#archive_mode = off/archive_mode = on/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#archive_command = ''/archive_command = 'test ! -f /mnt/postgresql-server/archive/%f && cp %p /mnt/postgresql-server/archive/%f'/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#max_wal_senders = 10/max_wal_senders = 10/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#max_replication_slots = 10/max_replication_slots = 10/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#wal_keep_segments = 0/wal_keep_segments = 64/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#hot_standby = on/hot_standby = on/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#synchronous_standby_names = ''/synchronous_standby_names = '*'/g" /etc/postgresql/12/main/postgresql.conf
+sudo sed -i -e "s/#shared_preload_libraries = ''/shared_preload_libraries = 'repmgr'/g" /etc/postgresql/12/main/postgresql.conf
 ```
 ```
-mkdir -p /mnt/postgresql-server/archive
+sudo mkdir -p /mnt/postgresql-server/archive
 ```
 
 #### Add/change postgresql connectivity in primary and standby server
 ```
-nano /etc/postgresql/12/main/pg_hba.conf
+sudo nano /etc/postgresql/12/main/pg_hba.conf
 ```
 ```
 host    repmgr          repmgr          192.168.33.21/32        trust
@@ -110,12 +111,12 @@ host    replication     repmgr          192.168.33.22/32        trust
 
 #### Restart service postgresql
 ```
-service postgresql restart
+sudo service postgresql restart
 ```
 
 #### Testing repmgr
 ```
-su - postgres
+sudo -i -u postgres
 psql 'host=192.168.33.21 dbname=repmgr user=repmgr connect_timeout=2'
 ```
 
@@ -123,7 +124,7 @@ psql 'host=192.168.33.21 dbname=repmgr user=repmgr connect_timeout=2'
 ## Create configure repmgr in primary and standby server
 #### For primary server
 ```
-nano /etc/repmgr.conf
+sudo nano /etc/repmgr.conf
 ```
 ```
 node_id=1
@@ -132,17 +133,18 @@ conninfo='host=192.168.33.21 user=repmgr dbname=repmgr connect_timeout=2'
 data_directory='/var/lib/postgresql/12/main'
 reconnect_attempts=4
 reconnect_interval=5
-failover=automatic
+failover='automatic'
 pg_bindir='/usr/lib/postgresql/12/bin'
 promote_command='repmgr standby remote -f /etc/repmgr.conf'
 follow_command='repmgr standby follow -f /etc/repmgr.conf'
 log_level=INFO
 log_file='/var/loh/postgresql/repmgr.log'
+failover='automatic'
 ```
 
 #### For standby server
 ```
-nano /etc/repmgr.conf
+sudo nano /etc/repmgr.conf
 ```
 ```
 node_id=2
@@ -151,17 +153,18 @@ conninfo='host=192.168.33.22 user=repmgr dbname=repmgr connect_timeout=2'
 data_directory='/var/lib/postgresql/12/main'
 reconnect_attempts=4
 reconnect_interval=5
-failover=automatic
+failover='automatic'
 pg_bindir='/usr/lib/postgresql/12/bin'
 promote_command='repmgr standby remote -f /etc/repmgr.conf'
 follow_command='repmgr standby follow -f /etc/repmgr.conf'
+priority=80
 log_level=INFO
 log_file='/var/loh/postgresql/repmgr.log'
 ```
 
 #### Allow automatic failover in primary and standby server
 ```
-nano /etc/default/repmgrd
+sudo nano /etc/default/repmgrd
 ```
 ```
 REPMGRD_ENABLED=yes
@@ -170,30 +173,30 @@ REPMGRD_CONF="/etc/repmgr.conf"
 
 #### Restart repmgr service
 ```
-service repmgrd restart
+sudo service repmgrd restart
 ```
 
 ### Register cluster in primary server
 ```
-su - postgres
+sudo -i -u postgres
 repmgr primary register
 repmgr cluster show
 ```
 
 ### Register cluster in standby server
 ```
-service postgresql stop
-service repmgrd stop
+sudo service postgresql stop
+sudo service repmgrd stop
 ```
 ```
-rm -rf /var/lib/postgresql/12/main
-su - postgres
+sudo rm -rf /var/lib/postgresql/12/main
+sudo -i -u postgres
 repmgr -h 192.168.33.21 -U repmgr -d repmgr -f /etc/repmgr.conf standby clone
 exit
-service postgresql start
+sudo service postgresql start
 ```
 ```
-su - postgres
+sudo -i -u postgres
 repmgr -f /etc/repmgr.conf standby register
 repmgr cluster show
 ```

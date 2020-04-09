@@ -40,6 +40,7 @@ Vagrant.configure("2") do |config|
         vb.cpus = 1
       end
       node.vm.hostname = "postgresql-#{i}"
+      node.ssh.insert_key = false
       node.vm.network "private_network", ip: IP_NW + "#{POSTGRESQL_IP + i}"
       node.vm.network "forwarded_port", guest: 22, host: "#{2520 + i}"
 
